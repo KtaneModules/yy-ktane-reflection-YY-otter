@@ -1,0 +1,4 @@
+- ModelComponent.obj
+- Surface.obj
+- statuslightPedestal.obj
+from Custom Asset Bundle
