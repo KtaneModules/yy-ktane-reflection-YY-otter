@@ -700,7 +700,7 @@ public class ReflectionScript : MonoBehaviour
                 {
                     case 0: edgeToString += "green";  break;
                     case 1: edgeToString += "yellow"; break;
-                    case 2: edgeToString += "ash";   break;
+                    case 2: edgeToString += "ash";    break;
                 }
 
                 edgeToString += ", " + edges[edgeSide, indexOnSide, 1] + " }";
