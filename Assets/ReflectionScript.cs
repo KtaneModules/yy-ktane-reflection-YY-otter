@@ -41,10 +41,10 @@ public class ReflectionScript : MonoBehaviour
 
     private int[,,] answerEdges = new int[4, BOARD_SIZE, 2];
 
-    private bool[,] isPassedVerticals = new bool[BOARD_SIZE + 1, BOARD_SIZE];
-    private bool[,] isPassedHorizontals = new bool[BOARD_SIZE, BOARD_SIZE + 1];
+    private bool[,] isPassedVerticals   = new bool[BOARD_SIZE + 1, BOARD_SIZE    ];
+    private bool[,] isPassedHorizontals = new bool[BOARD_SIZE    , BOARD_SIZE + 1];
 
-    private int[,] warpPositions = { { -1, -1 }, { -1, -1 } };
+    private int[,] warpPositions = { { 0, 0 }, { 0, 0 } };
 
     private IEnumerator playNoise;
     private KMAudio.KMAudioRef noisePlayer;
@@ -183,18 +183,18 @@ public class ReflectionScript : MonoBehaviour
 
                 switch (edgeStatus[0])
                 {
-                    case 0: debugIncorrect += "green"; break;
+                    case 0: debugIncorrect += "green";  break;
                     case 1: debugIncorrect += "yellow"; break;
-                    case 2: debugIncorrect += "ash"; break;
+                    case 2: debugIncorrect += "ash";    break;
                 }
 
                 debugIncorrect += " " + edgeStatus[1].ToString() + ", but the answer is ";
 
                 switch (answerEdges[edgeSide, indexOnSide, 0])
                 {
-                    case 0: debugIncorrect += "green"; break;
+                    case 0: debugIncorrect += "green";  break;
                     case 1: debugIncorrect += "yellow"; break;
-                    case 2: debugIncorrect += "ash"; break;
+                    case 2: debugIncorrect += "ash";    break;
                 }
 
                 debugIncorrect += " " + answerEdges[edgeSide, indexOnSide, 1].ToString() + ". Incorrect!";
@@ -216,8 +216,6 @@ public class ReflectionScript : MonoBehaviour
         {
             GetComponent<KMBombModule>().HandleStrike();
             StartCoroutine(ShowIncorrectEdge(incorrectEdges));
-
-            //FillAnswer();
         }
     }
 
@@ -390,10 +388,10 @@ public class ReflectionScript : MonoBehaviour
 
         switch (edgeSide)
         {
-            case 0: edgeStatus = ChaseLaser(1, indexOnSide + 1, 0, 0); break; // up
-            case 1: edgeStatus = ChaseLaser(BOARD_SIZE, indexOnSide + 1, 1, 0); break; // down
-            case 2: edgeStatus = ChaseLaser(indexOnSide + 1, 1, 2, 0); break; // left
-            case 3: edgeStatus = ChaseLaser(indexOnSide + 1, BOARD_SIZE, 3, 0); break; // right
+            case 0: edgeStatus = ChaseLaser(              1, indexOnSide + 1, 0, 0); break; // up
+            case 1: edgeStatus = ChaseLaser( BOARD_SIZE    , indexOnSide + 1, 1, 0); break; // down
+            case 2: edgeStatus = ChaseLaser(indexOnSide + 1,               1, 2, 0); break; // left
+            case 3: edgeStatus = ChaseLaser(indexOnSide + 1,  BOARD_SIZE    , 3, 0); break; // right
         }
 
         return edgeStatus;
@@ -410,10 +408,10 @@ public class ReflectionScript : MonoBehaviour
         // update passed path
         switch (comingDirection)
         {
-            case 0: isPassedVerticals[y - 1, x - 1] = true; break;
-            case 1: isPassedVerticals[y, x - 1] = true; break;
+            case 0: isPassedVerticals  [y - 1, x - 1] = true; break;
+            case 1: isPassedVerticals  [y    , x - 1] = true; break;
             case 2: isPassedHorizontals[y - 1, x - 1] = true; break;
-            case 3: isPassedHorizontals[y - 1, x] = true; break;
+            case 3: isPassedHorizontals[y - 1, x    ] = true; break;
         }
 
         // direction ... 0: up, 1: down, 2: left, 3: right
@@ -436,18 +434,18 @@ public class ReflectionScript : MonoBehaviour
             int[] returnStatus = new int[] { 0, 0 };
             switch (dir)
             {
-                case 0: returnStatus[0] = 1; break;
+                case 0: returnStatus[0] =  1; break;
                 case 1: returnStatus[0] = -1; break;
-                case 2: returnStatus[1] = 1; break;
+                case 2: returnStatus[1] =  1; break;
                 case 3: returnStatus[1] = -1; break;
             }
             return returnStatus;
         };
 
         // return[0] ... 0: green, 1: yellow, 2: ash
-        if (y == 0) return new int[] { 0, distance };
+             if (y == 0             ) return new int[] { 0, distance };
         else if (y == BOARD_SIZE + 1) return new int[] { 0, distance };
-        else if (x == 0) return new int[] { 0, distance };
+        else if (x == 0             ) return new int[] { 0, distance };
         else if (x == BOARD_SIZE + 1) return new int[] { 0, distance };
         else
         {
@@ -635,8 +633,6 @@ public class ReflectionScript : MonoBehaviour
                     }
                 }
 
-                //DebugLog("y: " + y + ", x: " + x + ", conversion: " + conversion);
-
                 if (x % 2 == 0)
                 {
                     index += conversion;
@@ -651,8 +647,6 @@ public class ReflectionScript : MonoBehaviour
                     else if (index < 62) index -= 4;
                     else if (index == 81) index = MAGIC_NUMBERS[index - 62] + (1 << 13);
                     else index = MAGIC_NUMBERS[index - 62];
-
-                    //DebugLog(index + ": " + (char)index);
 
                     puzzleSeed += (char)index;
 
@@ -704,9 +698,9 @@ public class ReflectionScript : MonoBehaviour
 
                 switch (edges[edgeSide, indexOnSide, 0])
                 {
-                    case 0: edgeToString += "green"; break;
+                    case 0: edgeToString += "green";  break;
                     case 1: edgeToString += "yellow"; break;
-                    case 2: edgeToString += "ash"; break;
+                    case 2: edgeToString += "ash";   break;
                 }
 
                 edgeToString += ", " + edges[edgeSide, indexOnSide, 1] + " }";
