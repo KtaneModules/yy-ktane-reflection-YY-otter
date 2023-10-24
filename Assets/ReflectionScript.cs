@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using KModkit;
 
@@ -13,6 +14,8 @@ public class ReflectionScript : MonoBehaviour
 
     public KMSelectable[] cells;
     public Texture[] icons;
+    public GameObject[] cellBackGrounds;
+    public Texture[] cellBackGroundTextures;
     public KMSelectable[] edges;
     public TextMesh[] edgeNums;
     public TextMesh[] edgeColorblinds;
@@ -30,6 +33,8 @@ public class ReflectionScript : MonoBehaviour
         new Color((float)0x80/0xff, (float)0x80/0xff, (float)0x80/0xff, (float)0xcc/0xff), // ash
         new Color((float)0xcc/0xff, (float)0x99/0xff, (float)0x99/0xff, (float)0xcc/0xff)  // red
     };
+    private static readonly float holdCellTimeLimit = 0.6f;
+    private static readonly float holdSubmitTimeLimit = 1.5f;
 
     // like global variable
     static int sameModuleCounter = 0;
@@ -46,7 +51,12 @@ public class ReflectionScript : MonoBehaviour
 
     private int[,] warpPositions = { { 0, 0 }, { 0, 0 } };
 
-    private IEnumerator playNoise;
+    private bool[,] isLocked = new bool[BOARD_SIZE, BOARD_SIZE];
+
+    private IEnumerator holdCellTimer;
+    private IEnumerator holdSubmitTimer;
+
+    private IEnumerator noisePlayerCoroutine;
     private KMAudio.KMAudioRef noisePlayer;
 
     private void Awake()
@@ -57,6 +67,7 @@ public class ReflectionScript : MonoBehaviour
         {
             int cellIndex = i;
             cells[i].OnInteract += delegate () { PressCell(cellIndex); return false; };
+            cells[i].OnInteractEnded += delegate () { ReleaseCell(cellIndex); };
         }
 
         for (int i = 0; i < edges.Length; i++)
@@ -67,6 +78,7 @@ public class ReflectionScript : MonoBehaviour
         }
 
         submit.OnInteract += delegate () { PressSubmit(); return false; };
+        submit.OnInteractEnded += delegate () { ReleaseSubmit(); };
     }
 
     // Use this for initialization
@@ -105,8 +117,37 @@ public class ReflectionScript : MonoBehaviour
     {
         if (moduleSolved) return;
 
+        GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonPress, transform);
+
+        holdCellTimer = HoldCell(cellIndex);
+        StartCoroutine(holdCellTimer);
+    }
+
+    private IEnumerator HoldCell(int cellIndex)
+    {
+        yield return new WaitForSeconds(holdCellTimeLimit);
+
+        holdCellTimer = null;
+
         int indexY = cellIndex / BOARD_SIZE;
         int indexX = cellIndex % BOARD_SIZE;
+
+        if (cellIconMap[indexY, indexX] != 11) UpdateCellLock(cellIndex); // 11: warp
+    }
+
+    private void ReleaseCell(int cellIndex)
+    {
+        if (moduleSolved) return;
+
+        if (holdCellTimer == null) return;
+
+        StopCoroutine(holdCellTimer);
+        holdCellTimer = null;
+
+        int indexY = cellIndex / BOARD_SIZE;
+        int indexX = cellIndex % BOARD_SIZE;
+
+        if (isLocked[indexY, indexX]) return;
 
         if (cellIconMap[indexY, indexX] == 10)
         {
@@ -123,8 +164,8 @@ public class ReflectionScript : MonoBehaviour
 
     private void PressEdge(int edgeIndex)
     {
-        playNoise = PlayNoise();
-        StartCoroutine(playNoise);
+        noisePlayerCoroutine = PlayNoise();
+        StartCoroutine(noisePlayerCoroutine);
 
         int[] edgeStatus = CalcEdgeStatus(edgeIndex);
 
@@ -136,10 +177,10 @@ public class ReflectionScript : MonoBehaviour
     private void ReleaseEdge(int edgeIndex)
     {
         noisePlayer.StopSound();
-        StopCoroutine(playNoise);
-        playNoise = null;
+        StopCoroutine(noisePlayerCoroutine);
+        noisePlayerCoroutine = null;
 
-        ResetLaserPath();
+        ResetLaserPathData();
         DrawLaserPath();
 
         ResetEdges();
@@ -148,6 +189,34 @@ public class ReflectionScript : MonoBehaviour
     private void PressSubmit()
     {
         if (moduleSolved) return;
+
+        GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.BigButtonPress, transform);
+        submit.AddInteractionPunch();
+
+        holdSubmitTimer = HoldSubmit();
+        StartCoroutine(holdSubmitTimer);
+    }
+
+    private IEnumerator HoldSubmit()
+    {
+        yield return new WaitForSeconds(holdSubmitTimeLimit);
+
+        holdSubmitTimer = null;
+
+        ResetBoard();
+        ResetEdges();
+    }
+
+    private void ReleaseSubmit()
+    {
+        if (moduleSolved) return;
+
+        GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.BigButtonRelease, transform);
+
+        if (holdSubmitTimer == null) return;
+
+        StopCoroutine(holdSubmitTimer);
+        holdSubmitTimer = null;
 
         // Debug Message
         DebugLog("Submission: " + MakeStringFromBoard(cellIconMap));
@@ -173,8 +242,8 @@ public class ReflectionScript : MonoBehaviour
 
                 switch (edgeSide)
                 {
-                    case 0: debugIncorrect += "U" + (char)(indexOnSide + 'A'); break;
-                    case 1: debugIncorrect += "D" + (char)(indexOnSide + 'A'); break;
+                    case 0: debugIncorrect += "T" + (char)(indexOnSide + 'A'); break;
+                    case 1: debugIncorrect += "B" + (char)(indexOnSide + 'A'); break;
                     case 2: debugIncorrect += "L" + (indexOnSide + 1).ToString(); break;
                     case 3: debugIncorrect += "R" + (indexOnSide + 1).ToString(); break;
                 }
@@ -206,9 +275,8 @@ public class ReflectionScript : MonoBehaviour
         if (isCorrect)
         {
             // Debug Message
-            DebugLog("Your submission is correct! Module solved.");
+            DebugLog("Your submission is correct! Module is solved.");
 
-            GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.CorrectChime, transform);
             GetComponent<KMBombModule>().HandlePass();
             moduleSolved = true;
         }
@@ -237,21 +305,21 @@ public class ReflectionScript : MonoBehaviour
 
         foreach (char vowel in VOWELS) if (serialNumber.IndexOf(vowel) > -1) hasVowel = true;
 
-        int DBatteryHolderNum = bomb.GetBatteryHolderCount(1);
+        int  DBatteryHolderNum = bomb.GetBatteryHolderCount(1);
         int AABatteryHolderNum = bomb.GetBatteryHolderCount(2);
 
-        int onIndicatorsNum = bomb.GetOnIndicators().Count();
+        int  onIndicatorsNum = bomb.GetOnIndicators().Count();
         int offIndicatorsNum = bomb.GetOffIndicators().Count();
         bool hasLitBob = bomb.IsIndicatorOn("BOB");
 
-        bool hasDVI = bomb.IsPortPresent("DVI");
-        bool hasParallel = bomb.IsPortPresent("Parallel");
-        bool hasPS2 = bomb.IsPortPresent("PS2");
-        bool hasRJ45 = bomb.IsPortPresent("RJ45");
-        bool hasSerial = bomb.IsPortPresent("Serial");
+        bool hasDVI       = bomb.IsPortPresent("DVI");
+        bool hasParallel  = bomb.IsPortPresent("Parallel");
+        bool hasPS2       = bomb.IsPortPresent("PS2");
+        bool hasRJ45      = bomb.IsPortPresent("RJ45");
+        bool hasSerial    = bomb.IsPortPresent("Serial");
         bool hasStereoRCA = bomb.IsPortPresent("StereoRCA");
-        int uniquePortNum = bomb.CountUniquePorts();
         int portPlateNum = bomb.GetPortPlateCount();
+        int uniquePortNum = bomb.CountUniquePorts();
 
         // change iconNums
         int[] iconNums = new int[] { 3, 3, 1, 1, 0, 1, 0, 0, 0, 0 };
@@ -259,33 +327,33 @@ public class ReflectionScript : MonoBehaviour
         if (hasVowel) iconNums[6]++;
         else iconNums[7]++;
 
-        for (int i = 0; i < DBatteryHolderNum; i++) iconNums[0]++;
+        for (int i = 0; i <  DBatteryHolderNum; i++) iconNums[0]++;
         for (int i = 0; i < AABatteryHolderNum; i++) iconNums[1]++;
 
         switch ((DBatteryHolderNum + 2 * AABatteryHolderNum) % 3)
         {
-            case 1: iconNums[2]++; break;
-            case 2: iconNums[3]++; break;
+            case  1: iconNums[2]++; break;
+            case  2: iconNums[3]++; break;
             default: iconNums[4]++; break;
         }
 
-        if (onIndicatorsNum > offIndicatorsNum) iconNums[6]++;
+             if (onIndicatorsNum > offIndicatorsNum) iconNums[6]++;
         else if (onIndicatorsNum < offIndicatorsNum) iconNums[7]++;
-        else iconNums[4]++;
+        else                                         iconNums[4]++;
 
         if (hasLitBob) for (int i = 0; i < 8; i++) iconNums[i]++;
 
-        if (hasDVI) iconNums[2]++;
-        if (hasPS2) iconNums[3]++;
-        if (hasSerial) iconNums[4]++;
-        if (hasParallel) iconNums[5]++;
-        if (hasRJ45) iconNums[6]++;
+        if (hasDVI)       iconNums[2]++;
+        if (hasPS2)       iconNums[3]++;
+        if (hasSerial)    iconNums[4]++;
+        if (hasParallel)  iconNums[5]++;
+        if (hasRJ45)      iconNums[6]++;
         if (hasStereoRCA) iconNums[7]++;
 
         // adjust iconNums
         int decreaseIconNum = 0;
         decreaseIconNum += DBatteryHolderNum + AABatteryHolderNum;
-        decreaseIconNum += Math.Min(uniquePortNum, portPlateNum);
+        decreaseIconNum += Math.Min(portPlateNum, uniquePortNum);
 
         int iconNumsSum = 0;
 
@@ -388,10 +456,10 @@ public class ReflectionScript : MonoBehaviour
 
         switch (edgeSide)
         {
-            case 0: edgeStatus = ChaseLaser(              1, indexOnSide + 1, 0, 0); break; // up
-            case 1: edgeStatus = ChaseLaser( BOARD_SIZE    , indexOnSide + 1, 1, 0); break; // down
+            case 0: edgeStatus = ChaseLaser(              1, indexOnSide + 1, 0, 0); break; // top
+            case 1: edgeStatus = ChaseLaser(     BOARD_SIZE, indexOnSide + 1, 1, 0); break; // bottom
             case 2: edgeStatus = ChaseLaser(indexOnSide + 1,               1, 2, 0); break; // left
-            case 3: edgeStatus = ChaseLaser(indexOnSide + 1,  BOARD_SIZE    , 3, 0); break; // right
+            case 3: edgeStatus = ChaseLaser(indexOnSide + 1,      BOARD_SIZE, 3, 0); break; // right
         }
 
         return edgeStatus;
@@ -402,7 +470,7 @@ public class ReflectionScript : MonoBehaviour
         // initialize
         if (distance == 0)
         {
-            ResetLaserPath();
+            ResetLaserPathData();
         }
 
         // update passed path
@@ -414,7 +482,7 @@ public class ReflectionScript : MonoBehaviour
             case 3: isPassedHorizontals[y - 1, x    ] = true; break;
         }
 
-        // direction ... 0: up, 1: down, 2: left, 3: right
+        // direction ... 0: top, 1: bottom, 2: left, 3: right
         int[,] REFLECTED_DIRECTIONS = {
             { 3, 2, 1, 0 },
             { 2, 3, 0, 1 },
@@ -443,9 +511,9 @@ public class ReflectionScript : MonoBehaviour
         };
 
         // return[0] ... 0: green, 1: yellow, 2: ash
-             if (y == 0             ) return new int[] { 0, distance };
+             if (y == 0)              return new int[] { 0, distance };
         else if (y == BOARD_SIZE + 1) return new int[] { 0, distance };
-        else if (x == 0             ) return new int[] { 0, distance };
+        else if (x == 0)              return new int[] { 0, distance };
         else if (x == BOARD_SIZE + 1) return new int[] { 0, distance };
         else
         {
@@ -481,7 +549,7 @@ public class ReflectionScript : MonoBehaviour
                 default:
                     int nextDirection = REFLECTED_DIRECTIONS[cellIconMap[y - 1, x - 1], comingDirection];
 
-                    // HACK: 0+1=1, 2+3=5 => (up & down) OR (left & right)
+                    // HACK: 0+1=1, 2+3=5 => (top & bottom) OR (left & right)
                     if ((nextDirection + comingDirection) % 4 == 1) return new int[] { 1, 2 * distance + 1 };
 
                     int[] nextPos = dirToNextCellPos(nextDirection);
@@ -502,6 +570,8 @@ public class ReflectionScript : MonoBehaviour
 
             if (answerBoard[indexY, indexX] == 11) UpdateCellView(i, 11);
             else UpdateCellView(i, 10);
+
+            UpdateCellLock(i, true);
         }
     }
 
@@ -525,6 +595,17 @@ public class ReflectionScript : MonoBehaviour
         cellIconMap[cellIndexY, cellIndexX] = iconIndex;
     }
 
+    private void UpdateCellLock(int cellIndex, bool shouldUnlock = false)
+    {
+        int indexY = cellIndex / BOARD_SIZE;
+        int indexX = cellIndex % BOARD_SIZE;
+
+        if (shouldUnlock) isLocked[indexY, indexX] = false;
+        else isLocked[indexY, indexX] = !isLocked[indexY, indexX];
+
+        cellBackGrounds[cellIndex].GetComponent<MeshRenderer>().material.mainTexture = cellBackGroundTextures[isLocked[indexY, indexX] ? 1 : 0];
+    }
+
     private void UpdateEdgeView(int edgeIndex, int edgeColorIndex, int edgeNum)
     {
         edges[edgeIndex].GetComponent<MeshRenderer>().material.color = EDGE_COLORS[edgeColorIndex];
@@ -545,19 +626,10 @@ public class ReflectionScript : MonoBehaviour
         edgeNums[edgeIndex].text = edgeNum.ToString();
     }
 
-    private IEnumerator ShowIncorrectEdge(List<int> incorrectEdges)
+    private void ResetLaserPathData()
     {
-        foreach (int edgeIndex in incorrectEdges)
-        {
-            int edgeSide = edgeIndex / BOARD_SIZE;
-            int indexOnSide = edgeIndex % BOARD_SIZE;
-
-            UpdateEdgeView(edgeIndex, 3, answerEdges[edgeSide, indexOnSide, 1]); // 3: red
-        }
-
-        yield return new WaitForSeconds(1.0f);
-
-        ResetEdges();
+        isPassedHorizontals = new bool[BOARD_SIZE, BOARD_SIZE + 1];
+        isPassedVerticals = new bool[BOARD_SIZE + 1, BOARD_SIZE];
     }
 
     private void DrawLaserPath()
@@ -581,10 +653,19 @@ public class ReflectionScript : MonoBehaviour
         }
     }
 
-    private void ResetLaserPath()
+    private IEnumerator ShowIncorrectEdge(List<int> incorrectEdges)
     {
-        isPassedHorizontals = new bool[BOARD_SIZE, BOARD_SIZE + 1];
-        isPassedVerticals = new bool[BOARD_SIZE + 1, BOARD_SIZE];
+        foreach (int edgeIndex in incorrectEdges)
+        {
+            int edgeSide = edgeIndex / BOARD_SIZE;
+            int indexOnSide = edgeIndex % BOARD_SIZE;
+
+            UpdateEdgeView(edgeIndex, 3, answerEdges[edgeSide, indexOnSide, 1]); // 3: red
+        }
+
+        yield return new WaitForSeconds(1.0f);
+
+        ResetEdges();
     }
 
     private IEnumerator PlayNoise()
@@ -593,7 +674,7 @@ public class ReflectionScript : MonoBehaviour
 
         yield return new WaitForSeconds(sounds[0].length);
 
-        StartCoroutine(playNoise);
+        StartCoroutine(noisePlayerCoroutine);
     }
 
     private void DebugSeedCode(int[,] answerBoard, bool shouldFlip)
@@ -712,5 +793,258 @@ public class ReflectionScript : MonoBehaviour
         edgeToString += " };";
 
         return edgeToString;
+    }
+
+    // for TP
+#pragma warning disable 414
+    private readonly string TwitchHelpMessage =
+        "!{0} tap <A-E><1-5> <0-9> [Changes cell icon] | !{0} hold <A-E><1-5> [Locks cell] | " +
+        "!{0} hold <A-E><T/B>/<1-5><L/R> <sec> [Beams a laser] | !{0} cycle | !{0} submit | !{0} reset | chainable with spaces " +
+        "(ex. !{0} tap A1 0 B5 1 hold A1 B5)" +
+        "\n" +
+        "!{0} solve <0-10> <0-10> ... <0-10> [Unlocks, Fills up all cell with icons and submits. The sequence length must be exactly 25. " +
+        "The numbers for the warp location are ignored. Tips: This command does not cause waiting.]";
+#pragma warning restore 414
+
+    private IEnumerator ProcessTwitchCommand(string command)
+    {
+        string[] commands = command.ToLowerInvariant().Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+        int mode = 0;
+        Queue<int> commandsToInt = new Queue<int> { };
+        Queue<float> commandsToFloat = new Queue<float> { };
+
+        bool regexJudge;
+        int indexY, indexX;
+
+        // reading commands
+        for (int i = 0; i < commands.Length; i++)
+        {
+            switch (commands[i])
+            {
+                case "tap":    mode = 1; commandsToInt.Enqueue(-mode); break;
+                case "hold":   mode = 2; commandsToInt.Enqueue(-mode); break;
+                case "cycle":  mode = 3; commandsToInt.Enqueue(-mode); break;
+                case "submit": mode = 4; commandsToInt.Enqueue(-mode); break;
+                case "reset":  mode = 5; commandsToInt.Enqueue(-mode); break;
+
+                case "solve":
+                    mode = 6;
+                    commandsToInt.Enqueue(-mode);
+
+                    for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+                    {
+                        i++; // move next command
+                        if (i == commands.Length) yield return "sendtochaterror Command about icons is missing.";
+
+                        regexJudge = Regex.IsMatch(commands[i], @"^([0-9]|10)$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                        if (!regexJudge) yield return "sendtochaterror " + commands[i] + " is an invalid icon command.";
+
+                        int iconNum;
+
+                        if (Int32.TryParse(commands[i], out iconNum)) commandsToInt.Enqueue(iconNum);
+                        else yield return "sendtochaterror An unexpected error occurred. Please report a bug.";
+                    }
+
+                    break;
+
+                default:
+                    regexJudge = Regex.IsMatch(commands[i], @"^([a-e][1-5]|[a-e][tb]|[1-5][lr]|[0-9]|10)$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                    if (!regexJudge) yield return "sendtochaterror " + commands[i] + " is an invalid command.";
+
+                    switch (mode)
+                    {
+                        case 1: // tap <A-E><1-5> <0-9>
+                            regexJudge = Regex.IsMatch(commands[i], @"^[a-e][1-5]$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                            if (!regexJudge) yield return "sendtochaterror " + commands[i] + " is an invalid position.";
+
+                            indexY = commands[i][1] - '1';
+                            indexX = commands[i][0] - 'a';
+
+                            commandsToInt.Enqueue(indexY * BOARD_SIZE + indexX);
+
+                            i++; // move next command
+                            if (i == commands.Length) yield return "sendtochaterror Command about icons is missing.";
+
+                            regexJudge = Regex.IsMatch(commands[i], @"^[0-9]$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                            if (!regexJudge) yield return "sendtochaterror " + commands[i] + " is an invalid icon command.";
+
+                            commandsToInt.Enqueue(commands[i][0] - '0');
+
+                            break;
+
+                        case 2: // hold <A-E><1-5>/(<A-E><T/B>/<1-5><L/R> <sec>)
+                            regexJudge = Regex.IsMatch(commands[i], @"^([a-e][1-5]|[a-e][tb]|[1-5][lr])$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                            if (!regexJudge) yield return "sendtochaterror " + commands[i] + " is an invalid position.";
+
+                            regexJudge = Regex.IsMatch(commands[i], @"^[a-e][1-5]$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                            if (regexJudge)
+                            {
+                                indexY = commands[i][1] - '1';
+                                indexX = commands[i][0] - 'a';
+
+                                commandsToInt.Enqueue(indexY * BOARD_SIZE + indexX);
+
+                                break;
+                            }
+
+                            // beams a laser
+                            regexJudge = Regex.IsMatch(commands[i], @"^[a-e][tb]$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+                            if (regexJudge)
+                            {
+                                indexY = commands[i][1] == 't' ? 0 : 1;
+                                indexX = commands[i][0] - 'a';
+
+                                commandsToInt.Enqueue(BOARD_SIZE * BOARD_SIZE + indexY * BOARD_SIZE + indexX);
+                            }
+                            else // @"^[1-5][lr]$"
+                            {
+                                indexY = commands[i][1] == 'l' ? 0 : 1;
+                                indexX = commands[i][0] - '1';
+
+                                commandsToInt.Enqueue(BOARD_SIZE * (BOARD_SIZE + 2) + indexY * BOARD_SIZE + indexX);
+                            }
+
+                            i++; // move next command
+                            if (i == commands.Length) yield return "sendtochaterror Command about sec is missing.";
+
+                            float sec;
+
+                            if (float.TryParse(commands[i], out sec)) commandsToFloat.Enqueue(sec);
+                            else yield return "sendtochaterror " + commands[i] + " is an invalid value.";
+
+                            break;
+
+                        default:
+                            yield return "sendtochaterror " + commands[i] + " is an invalid command.";
+                            break;
+                    }
+                    break;
+            }
+        }
+
+        // executing commands
+        mode = 0;
+
+        while (commandsToInt.Any())
+        {
+            yield return null;
+
+            int nextCommand = commandsToInt.Dequeue();
+            int index;
+
+            if (nextCommand < 0)
+            {
+                mode = -nextCommand;
+
+                switch (mode)
+                {
+                    case 3: // cycle
+                        for (int edgeIndex = 0; edgeIndex < edges.Length; edgeIndex++)
+                        {
+                            edges[edgeIndex].OnInteract();
+                            yield return new WaitForSeconds(1.0f);
+                            edges[edgeIndex].OnInteractEnded();
+                        }
+                        break;
+
+                    case 4: // submit
+                        submit.OnInteract();
+                        yield return null;
+                        submit.OnInteractEnded();
+                        break;
+
+                    case 5: // reset
+                        submit.OnInteract();
+                        yield return new WaitForSeconds(holdSubmitTimeLimit * 1.25f);
+                        submit.OnInteractEnded();
+                        break;
+
+                    case 6: // solve <0-10> <0-10> ... <0-10>
+                        for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+                        {
+                            index = commandsToInt.Dequeue();
+
+                            DebugLog(commandsToInt.Count());
+
+                            indexY = cellIndex / BOARD_SIZE;
+                            indexX = cellIndex % BOARD_SIZE;
+
+                            if (isLocked[indexY, indexX])
+                            {
+                                UpdateCellLock(cellIndex);
+                                yield return new WaitForSeconds(holdCellTimeLimit * 0.25f);
+                            }
+
+                            if (cellIconMap[indexY, indexX] != 11)
+                            {
+                                UpdateCellView(cellIndex, index);
+                                yield return new WaitForSeconds(holdCellTimeLimit * 0.25f);
+                            }
+                        }
+
+                        submit.OnInteract();
+                        yield return new WaitForSeconds(holdSubmitTimeLimit * 0.25f);
+                        submit.OnInteractEnded();
+
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+            else
+            {
+                switch (mode)
+                {
+                    case 1: // tap <A-E><1-5> <0-9>
+                        index = nextCommand;
+
+                        nextCommand = commandsToInt.Dequeue();
+
+                        while ((int)bomb.GetTime() % 10 != nextCommand) yield return true;
+
+                        cells[index].OnInteract();
+                        yield return new WaitForSeconds(holdCellTimeLimit * 0.25f);
+                        cells[index].OnInteractEnded();
+
+                        break;
+
+                    case 2: // hold <A-E><1-5>/(<A-E><T/B>/<1-5><L/R> <sec>)
+                        if (nextCommand < BOARD_SIZE * BOARD_SIZE) // cell hold
+                        {
+                            cells[nextCommand].OnInteract();
+                            yield return new WaitForSeconds(holdCellTimeLimit * 1.25f);
+                            cells[nextCommand].OnInteractEnded();
+                        }
+                        else // edge hold
+                        {
+                            index = nextCommand - BOARD_SIZE * BOARD_SIZE;
+
+                            float holdLength = commandsToFloat.Dequeue();
+
+                            edges[index].OnInteract();
+                            yield return new WaitForSeconds(holdLength);
+                            edges[index].OnInteractEnded();
+                        }
+                        break;
+
+                    default:
+                        yield return "sendtochaterror An unexpected error occurred. Please report a bug.";
+                        break;
+                }
+            }
+        }
+
+        yield break;
+    }
+
+    private IEnumerator TwitchHandleForcedSolve()
+    {
+        DebugLog("This module is auto-solved.");
+        FillAnswer();
+        submit.OnInteract();
+        yield return new WaitForSeconds(holdSubmitTimeLimit * 0.25f);
+        submit.OnInteractEnded();
     }
 }
